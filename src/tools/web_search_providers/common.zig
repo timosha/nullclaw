@@ -75,6 +75,24 @@ pub fn curlPostJson(
     };
 }
 
+pub fn curlPostJsonWithStatus(
+    allocator: std.mem.Allocator,
+    url: []const u8,
+    body: []const u8,
+    headers: []const []const u8,
+    timeout_secs: []const u8,
+) (ProviderSearchError || error{OutOfMemory})!http_util.HttpResponse {
+    if (builtin.is_test) return error.RequestFailed;
+
+    return http_util.curlPostWithStatusAndTimeout(allocator, url, body, headers, timeout_secs) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => {
+            log.err("curl POST failed: {s} (timeout={s}s)", .{ @errorName(err), timeout_secs });
+            return error.RequestFailed;
+        },
+    };
+}
+
 pub fn timeoutToString(allocator: std.mem.Allocator, timeout_secs: u64) ![]u8 {
     const default_timeout_secs: u64 = 30;
     const effective_timeout = if (timeout_secs == 0) default_timeout_secs else timeout_secs;

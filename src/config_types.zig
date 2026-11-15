@@ -1689,7 +1689,7 @@ pub const HttpRequestConfig = struct {
     ///   - "https://searx.example.com/search"
     search_base_url: ?[]const u8 = null,
     /// Search provider for web_search.
-    /// Supported: auto, searxng, duckduckgo (ddg), brave, firecrawl,
+    /// Supported: auto, searxng, yandex, duckduckgo (ddg), brave, firecrawl,
     /// tavily, perplexity, exa, jina.
     search_provider: []const u8 = "auto",
     /// Optional fallback provider chain used when the primary provider fails.
@@ -1710,6 +1710,7 @@ pub const HttpRequestConfig = struct {
         const trimmed = std.mem.trim(u8, raw, " \t\r\n");
         return std.ascii.eqlIgnoreCase(trimmed, "auto") or
             std.ascii.eqlIgnoreCase(trimmed, "searxng") or
+            std.ascii.eqlIgnoreCase(trimmed, "yandex") or
             std.ascii.eqlIgnoreCase(trimmed, "duckduckgo") or
             std.ascii.eqlIgnoreCase(trimmed, "ddg") or
             std.ascii.eqlIgnoreCase(trimmed, "brave") or

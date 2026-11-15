@@ -1840,7 +1840,7 @@ pub const Config = struct {
             ValidationError.InvalidOtelEndpoint => std.debug.print("Config error: diagnostics.otel.endpoint/otel_endpoint must be an absolute https:// URL (or http:// for localhost/private or container-local collector hosts).\n", .{}),
             ValidationError.InvalidOtelHeader => std.debug.print("Config error: diagnostics.otel.headers/otel_headers must contain valid HTTP header names/values (no CR/LF).\n", .{}),
             ValidationError.InvalidHttpSearchBaseUrl => std.debug.print("Config error: http_request.search_base_url must be https://host[/search] or local http://host[:port][/search] (no query/fragment).\n", .{}),
-            ValidationError.InvalidHttpSearchProvider => std.debug.print("Config error: http_request.search_provider must be one of: auto, searxng, duckduckgo(ddg), brave, firecrawl, tavily, perplexity, exa, jina.\n", .{}),
+            ValidationError.InvalidHttpSearchProvider => std.debug.print("Config error: http_request.search_provider must be one of: auto, searxng, yandex, duckduckgo(ddg), brave, firecrawl, tavily, perplexity, exa, jina.\n", .{}),
             ValidationError.InvalidHttpSearchFallbackProvider => std.debug.print("Config error: http_request.search_fallback_providers entries must be valid providers and cannot be 'auto'.\n", .{}),
             ValidationError.InvalidProviderApiMode => std.debug.print("Config error: models.providers.<name>.api_mode must be 'chat_completions' or 'responses'.\n", .{}),
             ValidationError.InvalidProviderBaseUrl => std.debug.print("Config error: models.providers.<name>.base_url and custom: provider URLs must be absolute http(s) URLs with no query/fragment; plain HTTP is allowed only for localhost/private hosts.\n", .{}),
@@ -2895,6 +2895,7 @@ test "save roundtrip preserves extended config sections" {
     try std.testing.expectEqualStrings("brave", loaded.http_request.search_provider);
     try std.testing.expectEqual(@as(usize, 2), loaded.http_request.search_fallback_providers.len);
     try std.testing.expectEqualStrings("jina", loaded.http_request.search_fallback_providers[0]);
+    try std.testing.expectEqualStrings("duckduckgo", loaded.http_request.search_fallback_providers[1]);
     try std.testing.expectEqual(@as(?u32, 500), loaded.diagnostics.api_error_max_chars);
     try std.testing.expectEqualStrings("aieos", loaded.identity.format);
     try std.testing.expectEqual(@as(u8, 70), loaded.cost.warn_at_percent);
@@ -3348,6 +3349,12 @@ test "validation rejects invalid http_request search provider" {
     };
     cfg.http_request.search_provider = "google";
     try std.testing.expectError(Config.ValidationError.InvalidHttpSearchProvider, cfg.validate());
+}
+
+test "validation accepts yandex http_request search provider" {
+    try std.testing.expect(config_types.HttpRequestConfig.isValidSearchProviderName("yandex"));
+    try std.testing.expect(config_types.HttpRequestConfig.isValidSearchProviderName("YANDEX"));
+    try std.testing.expect(config_types.HttpRequestConfig.isValidSearchFallbackProviderName("yandex"));
 }
 
 test "validation rejects invalid http_request search fallback provider" {

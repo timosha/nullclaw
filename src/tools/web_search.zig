@@ -2,6 +2,7 @@
 //!
 //! Supported providers:
 //!   - searxng
+//!   - yandex (Yandex Search API)
 //!   - duckduckgo (ddg)
 //!   - brave
 //!   - firecrawl
@@ -33,11 +34,12 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// Upper bound for provider chain size (primary + fallbacks + auto expansions).
 const MAX_PROVIDER_CHAIN: usize = 16;
 const WEB_SEARCH_SETUP_HINT =
-    "web_search is not configured with a reliable provider. Configure http_request.search_base_url for SearXNG or set one of BRAVE_API_KEY, FIRECRAWL_API_KEY, TAVILY_API_KEY, PERPLEXITY_API_KEY, EXA_API_KEY, JINA_API_KEY, or WEB_SEARCH_API_KEY. DuckDuckGo is best-effort only.";
+    "web_search is not configured with a reliable provider. Configure http_request.search_base_url for SearXNG or set one of BRAVE_API_KEY, YC_SEARCH_API_KEY (Yandex, together with YC_FOLDER_ID), FIRECRAWL_API_KEY, TAVILY_API_KEY, PERPLEXITY_API_KEY, EXA_API_KEY, JINA_API_KEY, or WEB_SEARCH_API_KEY. DuckDuckGo is best-effort only.";
 
 const SearchProvider = enum {
     auto,
     searxng,
+    yandex,
     duckduckgo,
     brave,
     firecrawl,
@@ -67,7 +69,7 @@ pub const WebSearchTool = struct {
     pub const tool_name = "web_search";
     pub const tool_description = "Search the internet for real-time information, recipes, news, or technical documentation that might not be in your local knowledge base. Use this whenever the user asks for information from the web or the internet.";
     pub const tool_params =
-        \\{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Search query"},"count":{"type":"integer","minimum":1,"maximum":10,"default":5,"description":"Number of results (1-10)"},"provider":{"type":"string","description":"Optional provider override (auto,searxng,duckduckgo,ddg,brave,firecrawl,tavily,perplexity,exa,jina)"}},"required":["query"]}
+        \\{"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"Search query"},"count":{"type":"integer","minimum":1,"maximum":10,"default":5,"description":"Number of results (1-10)"},"provider":{"type":"string","description":"Optional provider override (auto,searxng,yandex,duckduckgo,ddg,brave,firecrawl,tavily,perplexity,exa,jina)"}},"required":["query"]}
     ;
 
     const vtable = root.ToolVTable(@This());
@@ -91,7 +93,7 @@ pub const WebSearchTool = struct {
 
         var chain_buf: [MAX_PROVIDER_CHAIN]SearchProvider = undefined;
         const chain = buildProviderChain(self, provider_raw, &chain_buf) catch |err| switch (err) {
-            error.InvalidProvider => return ToolResult.fail("Invalid web_search provider. Supported: auto, searxng, duckduckgo(ddg), brave, firecrawl, tavily, perplexity, exa, jina."),
+            error.InvalidProvider => return ToolResult.fail("Invalid web_search provider. Supported: auto, searxng, yandex, duckduckgo(ddg), brave, firecrawl, tavily, perplexity, exa, jina."),
             else => return err,
         };
 
@@ -134,6 +136,7 @@ fn parseProvider(raw: []const u8) ?SearchProvider {
     const trimmed = std.mem.trim(u8, raw, " \t\n\r");
     if (std.ascii.eqlIgnoreCase(trimmed, "auto")) return .auto;
     if (std.ascii.eqlIgnoreCase(trimmed, "searxng")) return .searxng;
+    if (std.ascii.eqlIgnoreCase(trimmed, "yandex")) return .yandex;
     if (std.ascii.eqlIgnoreCase(trimmed, "duckduckgo") or std.ascii.eqlIgnoreCase(trimmed, "ddg")) return .duckduckgo;
     if (std.ascii.eqlIgnoreCase(trimmed, "brave")) return .brave;
     if (std.ascii.eqlIgnoreCase(trimmed, "firecrawl")) return .firecrawl;
@@ -148,6 +151,7 @@ fn providerName(provider: SearchProvider) []const u8 {
     return switch (provider) {
         .auto => "auto",
         .searxng => "searxng",
+        .yandex => "yandex",
         .duckduckgo => "duckduckgo",
         .brave => "brave",
         .firecrawl => "firecrawl",
@@ -239,6 +243,7 @@ fn buildProviderChain(
                 appendProviderUnique(chain_buf, &len, .searxng);
             }
         }
+        appendProviderUnique(chain_buf, &len, .yandex);
         appendProviderUnique(chain_buf, &len, .brave);
         appendProviderUnique(chain_buf, &len, .firecrawl);
         appendProviderUnique(chain_buf, &len, .tavily);
@@ -275,6 +280,13 @@ fn executeWithProvider(
             return search_providers.searxng.execute(allocator, query, count, trimmed, self.timeout_secs);
         },
         .duckduckgo => return search_providers.duckduckgo.execute(allocator, query, count, self.timeout_secs),
+        .yandex => {
+            const api_key = tryApiKeyFromEnvOrNull(allocator, &.{"YC_SEARCH_API_KEY"}) orelse return error.MissingApiKey;
+            defer allocator.free(api_key);
+            const folder_id = tryApiKeyFromEnvOrNull(allocator, &.{"YC_FOLDER_ID"}) orelse return error.MissingApiKey;
+            defer allocator.free(folder_id);
+            return search_providers.yandex.execute(allocator, query, count, api_key, folder_id, self.timeout_secs);
+        },
         .brave => {
             const api_key = tryApiKeyFromEnvOrNull(allocator, &.{"BRAVE_API_KEY"}) orelse return error.MissingApiKey;
             defer allocator.free(api_key);
@@ -363,6 +375,10 @@ pub fn formatSearxngResults(allocator: std.mem.Allocator, json_body: []const u8,
     return search_providers.searxng.formatResults(allocator, json_body, query);
 }
 
+pub fn formatYandexResults(allocator: std.mem.Allocator, json_body: []const u8, query: []const u8) !ToolResult {
+    return search_providers.yandex.formatResults(allocator, json_body, query);
+}
+
 // ══════════════════════════════════════════════════════════════════
 // Tests
 // ══════════════════════════════════════════════════════════════════
@@ -370,6 +386,8 @@ pub fn formatSearxngResults(allocator: std.mem.Allocator, json_body: []const u8,
 const testing = std.testing;
 const search_api_key_env_vars = [_][]const u8{
     "BRAVE_API_KEY",
+    "YC_SEARCH_API_KEY",
+    "YC_FOLDER_ID",
     "FIRECRAWL_API_KEY",
     "TAVILY_API_KEY",
     "PERPLEXITY_API_KEY",
@@ -657,6 +675,98 @@ test "formatBraveResults invalid JSON" {
 
 test "formatSearxngResults invalid JSON" {
     const result = try formatSearxngResults(testing.allocator, "not json", "q");
+    try testing.expect(!result.success);
+}
+
+test "parseProvider accepts yandex" {
+    try testing.expectEqual(SearchProvider.yandex, parseProvider("yandex").?);
+    try testing.expectEqual(SearchProvider.yandex, parseProvider("Yandex").?);
+    try testing.expect(parseProvider("ya") == null);
+}
+
+test "buildProviderChain auto places yandex between searxng and brave" {
+    var wst = WebSearchTool{
+        .searxng_base_url = "https://searx.example.com",
+        .provider = "auto",
+    };
+    var chain_buf: [MAX_PROVIDER_CHAIN]SearchProvider = undefined;
+    const chain = try buildProviderChain(&wst, "auto", &chain_buf);
+    try testing.expect(chain.len >= 3);
+    try testing.expectEqual(SearchProvider.searxng, chain[0]);
+    try testing.expectEqual(SearchProvider.yandex, chain[1]);
+    try testing.expectEqual(SearchProvider.brave, chain[2]);
+}
+
+test "buildProviderChain auto without searxng starts with yandex then brave" {
+    var wst = WebSearchTool{ .provider = "auto" };
+    var chain_buf: [MAX_PROVIDER_CHAIN]SearchProvider = undefined;
+    const chain = try buildProviderChain(&wst, "auto", &chain_buf);
+    try testing.expectEqual(SearchProvider.yandex, chain[0]);
+    try testing.expectEqual(SearchProvider.brave, chain[1]);
+}
+
+test "WebSearchTool explicit yandex without key names YC_SEARCH_API_KEY" {
+    // Missing-key failure must name the expected environment variable and be
+    // distinguishable from an API authorization rejection (setup hint path).
+    var env_guard = try platform.TestEnvGuard.captureAndClear(testing.allocator, &.{ "YC_SEARCH_API_KEY", "YC_FOLDER_ID" });
+    defer env_guard.deinit();
+
+    var wst = WebSearchTool{ .provider = "yandex" };
+    const parsed = try root.parseTestArgs("{\"query\":\"zig\"}");
+    defer parsed.deinit();
+    const result = try wst.execute(testing.allocator, parsed.value.object);
+    defer if (result.error_msg) |e| testing.allocator.free(e);
+
+    try testing.expect(!result.success);
+    try testing.expect(std.mem.indexOf(u8, result.error_msg.?, "YC_SEARCH_API_KEY") != null);
+    try testing.expect(std.mem.indexOf(u8, result.error_msg.?, "not configured with a reliable provider") != null);
+    try testing.expect(std.mem.indexOf(u8, result.error_msg.?, "rejected authorization") == null);
+}
+
+test "WebSearchTool yandex key is env-only and missing folder id fails cleanly" {
+    // Env-only key semantics (no config field, matching the brave provider):
+    // without YC_FOLDER_ID the provider is treated as not configured
+    // (auto-chain skip semantics); the duped env lookups must be freed
+    // (leak-checked by the testing allocator).
+    var env_guard = try platform.TestEnvGuard.captureAndClear(testing.allocator, &.{ "YC_SEARCH_API_KEY", "YC_FOLDER_ID" });
+    defer env_guard.deinit();
+
+    var wst = WebSearchTool{ .provider = "yandex" };
+    const parsed = try root.parseTestArgs("{\"query\":\"zig\"}");
+    defer parsed.deinit();
+    const result = try wst.execute(testing.allocator, parsed.value.object);
+    defer if (result.error_msg) |e| testing.allocator.free(e);
+
+    try testing.expect(!result.success);
+    try testing.expect(std.mem.indexOf(u8, result.error_msg.?, "yandex:MissingApiKey") != null);
+}
+
+test "formatYandexResults parses valid JSON" {
+    const json =
+        \\{"groups":[
+        \\  {"results":[
+        \\    {"title":"Zig Language","url":"https://ziglang.org","headline":"Zig is a systems language."}
+        \\  ]}
+        \\]}
+    ;
+    const result = try formatYandexResults(testing.allocator, json, "zig yandex");
+    defer testing.allocator.free(result.output);
+    try testing.expect(result.success);
+    try testing.expect(std.mem.indexOf(u8, result.output, "Results for: zig yandex") != null);
+    try testing.expect(std.mem.indexOf(u8, result.output, "1. Zig Language") != null);
+    try testing.expect(std.mem.indexOf(u8, result.output, "https://ziglang.org") != null);
+}
+
+test "formatYandexResults empty results" {
+    const json = "{\"groups\":[]}";
+    const result = try formatYandexResults(testing.allocator, json, "nothing");
+    defer testing.allocator.free(result.output);
+    try testing.expect(result.success);
+    try testing.expectEqualStrings("No web results found.", result.output);
+}
+
+test "formatYandexResults invalid JSON" {
+    const result = try formatYandexResults(testing.allocator, "not json", "q");
     try testing.expect(!result.success);
 }
 

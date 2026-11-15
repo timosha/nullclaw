@@ -1,6 +1,7 @@
 pub const common = @import("common.zig");
 pub const brave = @import("brave.zig");
 pub const searxng = @import("searxng.zig");
+pub const yandex = @import("yandex.zig");
 pub const duckduckgo = @import("duckduckgo.zig");
 pub const firecrawl = @import("firecrawl.zig");
 pub const tavily = @import("tavily.zig");
@@ -13,6 +14,7 @@ test {
     _ = common;
     _ = brave;
     _ = searxng;
+    _ = yandex;
     _ = duckduckgo;
     _ = firecrawl;
     _ = tavily;
